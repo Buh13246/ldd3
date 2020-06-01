@@ -92,6 +92,9 @@ static void scull_setup_cdev(struct scull_dev *dev, int index)
 	dev->cdev.ops = &scull_fops;
 	mutex_init(&dev->mutex);
 
+	dev->quantum = scull_quantum;
+	dev->qset = scull_qset;
+
 	err = cdev_add(&dev->cdev, devno, 1);
 	if (err)
 		printk(KERN_NOTICE "Error %d adding scull%d", err, index);
@@ -199,7 +202,6 @@ out:
 
 ssize_t scull_write(struct file *filp, const char __user *buff, size_t count, loff_t *f_pos)
 {
-
 	struct scull_dev *dev = filp->private_data;
 	struct scull_qset *dptr;    /* the first listitem */
 	int quantum = dev->quantum, qset = dev->qset;
@@ -208,9 +210,13 @@ ssize_t scull_write(struct file *filp, const char __user *buff, size_t count, lo
 	ssize_t retval = -ENOMEM; /* value used in "goto out" statements */
 
 	printk(KERN_INFO "scull: Write to devices size: %lu", count);
+	printk(KERN_INFO "scull: Write to offset %p", f_pos);
 
 	if (mutex_lock_interruptible(&dev->mutex))
 		return -ERESTARTSYS;
+
+	if((filp->f_flags & O_APPEND) == O_APPEND)
+		*f_pos = dev->size;
 
 	item = (long)*f_pos / itemsize;
 	rest = (long)*f_pos % itemsize;
@@ -285,6 +291,7 @@ static void __exit scull_exit(void)
 	int i;
 	for (i=0; i < scull_nr_devs; ++i) {
 		cdev_del(&devices[i].cdev);
+		scull_trim(&devices[i]);
 		printk(KERN_INFO "scull: deregistered device %d", i);
 	}
 	unregister_chrdev_region(dev, scull_nr_devs);
